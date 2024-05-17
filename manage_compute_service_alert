@@ -1,0 +1,138 @@
+#!/bin/bash
+#set -euo pipefail
+
+
+f_dump_env_to_log(){
+echo -e "\n --- $(date) ---" >> /var/log/prometheus-am-executor-test.log
+set | egrep "^AMX_" >> /var/log/prometheus-am-executor-test.log
+echo -e "--------------- \n" >> /var/log/prometheus-am-executor-test.log
+}
+
+#API_server='10.4.80.214'
+API_server='10.4.188.23'
+script="check_ha_alerting.sh"
+
+#main() {
+#  f_dump_env_to_log
+
+  case $AMX_LABEL_alertname in
+   HA_test*)
+    set | grep 'AMX'
+    echo "$(date) " "test success"
+    echo AMX_STATUS : $AMX_STATUS
+    echo AMX_RECEIVER : $AMX_RECEIVER
+    echo AMX_EXTERNAL_URL :  $AMX_EXTERNAL_URL
+    echo AMX_ALERT_LEN : $AMX_ALERT_LEN
+    echo AMX_RECEIVER : $AMX_RECEIVER
+    echo AMX_ALERT_1_LABEL_instanceId : $AMX_ALERT_1_LABEL_instanceId
+    ;;
+  esac
+
+  case $AMX_LABEL_alertname in
+   autoHA*)
+    set |grep 'AMX'
+    f_dump_env_to_log
+
+    if [ $AMX_LABEL_openstack_platform = "IPC2.0_BD_Staging" ] ; then
+      overcloudrc="overcloudrc_bd_staging"
+      stackrc="stackrc_bd_staging"
+      aggHA="test"
+
+    elif [ $AMX_LABEL_openstack_platform = "IPC2.0_YD_PROD_KTIS" ] ; then  ## OSP16 ##
+      overcloudrc="overcloudrc_yd_prod_central"
+      stackrc="stackrc_yd_prod_ktis"
+      director="10.0.207.234"
+      if [ $AMX_LABEL_stack = "yd_prod_dmz" ] ; then
+        aggHA="YD-PROD-DMZ_PRIV-HA"
+        inventory="inventory_yd_prod_dmz.yml"
+      elif [ $AMX_LABEL_stack = "yd_prod_ktis" ] ; then
+        aggHA="YD-PROD-KTIS-HA"
+        inventory="inventory_yd_prod_ktis.yml"
+      elif [ $AMX_LABEL_stack = "yd_devtb" ] ; then
+        aggHA="YD-DEV-TB-HA"
+        inventory="inventory_yd_devtb.yml"
+      elif [ $AMX_LABEL_stack = "yd_prod_heartbeat" ] ; then 
+        aggHA="YD-PROD-DMZ_PRIV-heartbeat-HA"
+        inventory="inventory_yd_heartbeat.yml"
+      fi
+
+    elif [ $AMX_LABEL_openstack_platform = "IPC2.0_MD_Staging_SDDC" ] ; then
+      overcloudrc="overcloudrc_md_staging_sddc"
+      stackrc="stackrc_md_staging_sddc"
+      director="10.4.190.63"
+      if [ $AMX_LABEL_stack = "md_staging_sddc" ] ; then
+        aggHA="autoHA"
+        inventory="inventory_md_staging_sddc.yml"
+      fi
+
+    elif [ $AMX_LABEL_openstack_platform = "IPC2.0_MD_Staging_IPC" ] ; then
+      overcloudrc="overcloudrc_md_staging_ipc"
+      stackrc="stackrc_md_staging_ipc"
+      director="10.4.188.23"
+      if [ $AMX_LABEL_stack = "md_staging_ipc" ] ; then
+        aggHA="MD-STAGING-HA"
+        inventory="inventory_md_staging_ipc.yml"
+#        script="check_ha_staging.sh"
+      fi
+
+    else
+      echo "$(date) " "Error greping Label Info. break."
+      break
+#      overcloudrc="overcloudrc_bd_staging"
+#      stackrc="stackrc_bd_staging"
+#      aggHA="HA"
+    fi
+
+    alert_len=${AMX_ALERT_LEN%=*}
+    echo "$(date) " "alert_LEN: " $alert_len
+
+    for i in $(seq 1 "$AMX_ALERT_LEN"); do
+      ref="AMX_ALERT_${i}_STATUS"
+      alert_status=$(echo "${!ref}")
+
+      if [[ $alert_status != "firing" ]]; then
+        echo "$(date) " "## This alert${i} is resolved ## "
+        echo "$(date) " "## This alert${i} is resolved ## "  >> /var/log/prometheus-am-executor-test.log
+
+      else
+        Cnode_ip="AMX_ALERT_${i}_LABEL_instance"
+        Cnode_ip=$(echo "${!Cnode_ip}" | cut -d: -f1)
+        Cnode=`ssh root@$API_server "source /root/overcloudrc/$overcloudrc;openstack --insecure hypervisor list  | grep -i $Cnode_ip" | awk '{print $4}'`
+        echo "$(date) " "Compute node: "$Cnode_ip $Cnode
+
+
+        echo "$(date) " "###### HA CHECK SCRIPT START ######"
+        echo "$(date) " "###### HA CHECK SCRIPT START ######" >> /var/log/prometheus-am-executor-test.log
+        echo "script info: " $script >> /var/log/prometheus-am-executor-test.log
+        sh /prometheus/prometheus-am-executor/examples/$script $Cnode $Cnode_ip $overcloudrc $aggHA $stackrc $inventory $director
+#        sh /prometheus/prometheus-am-executor/examples/check_ha_alerting.sh $Cnode $Cnode_ip $overcloudrc $aggHA $stackrc $inventory $director
+      fi
+    done
+
+#    set | grep 'AMX'
+#    fire_len=$(set |grep 'STATUS=firing' |cut -d "_" -f3)
+#
+#    if  [ ${AMX_ALERT_1_STATUS} = "firing" ]; then
+#      Cnode_ip=${AMX_ALERT_1_LABEL_instance%:*0}
+#      Cnode=`ssh root@$API_server "source /root/overcloudrc/$overcloudrc;openstack --insecure hypervisor list  | grep -i ${AMX_ALERT_1_LABEL_instance%:*0}" | awk '{print $4}'`
+#      echo "ALERT_LEN == 1 && Firing"
+#
+#    else
+#      eval "echo instance : \${AMX_ALERT_${fire_len}_LABEL_instance%:*0}"
+#      hostname
+#
+#      Cnode_ip=$(eval "echo \${AMX_ALERT_${fire_len}_LABEL_instance%:*0}")
+#      Cnode=`ssh root@$API_server "source /root/overcloudrc/$overcloudrc;openstack --insecure hypervisor list  | grep -i ${Cnode_ip}" | awk '{print $4}'`
+#      echo "EVENT Cnode: " $Cnode
+#      echo "ALERT_LEN >=2 OR LEN=1 Resolved"
+#    fi
+#
+#    ssh root@$API_server "source /root/overcloudrc/$overcloudrc;openstack --insecure server list --all-projects --host $Cnode"
+#
+
+#    echo "###### HA CHECK SCRIPT START ######"
+#    echo "###### HA CHECK SCRIPT START ######" >> /var/log/prometheus-am-executor-test.log
+#    echo "ssh root@$API_server source /root/overcloudrc/$overcloudrc;openstack --insecure server list --all-projects --host $Cnode"
+#    sh /prometheus/prometheus-am-executor/examples/check_ha_alerting.sh $Cnode $Cnode_ip $overcloudrc $aggHA $stackrc $inventory
+    ;;
+  esac
