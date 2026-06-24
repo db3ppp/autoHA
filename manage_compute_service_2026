@@ -1,0 +1,88 @@
+#!/bin/bash
+set -euo pipefail
+
+f_dump_env_to_log(){
+  echo -e "\n --- $(date) ---" >> /var/log/autoHA-2026.log
+  set | grep "^AMX_" >> /var/log/autoHA-2026.log
+  echo -e "--------------- \n" >> /var/log/autoHA-2026.log
+}
+
+# ── 기본값 선언 (set -u 대응) ──────────────────────────────
+aggHA=""
+inventory=""
+director=""
+# ───────────────────────────────────────────────────────────
+
+case $AMX_LABEL_alertname in
+  alert_test*)
+    set | grep 'AMX'
+    echo "$(date) " "test success"
+    echo "AMX_STATUS         : $AMX_STATUS"
+    echo "AMX_RECEIVER       : $AMX_RECEIVER"
+    echo "AMX_EXTERNAL_URL   : $AMX_EXTERNAL_URL"
+    echo "AMX_ALERT_LEN      : $AMX_ALERT_LEN"
+    echo "AMX_ALERT_1_LABEL_instanceId : ${AMX_ALERT_1_LABEL_instanceId:-}"
+    ;;
+esac
+
+case $AMX_LABEL_alertname in
+  HA_test*)
+    set | grep 'AMX'
+    f_dump_env_to_log
+
+    # ── openstack_platform 라벨 미정의 대응 ──────────────────
+    openstack_platform="${AMX_LABEL_openstack_platform:-unknown}"
+    # ─────────────────────────────────────────────────────────
+
+    if [ "$openstack_platform" = "IPC2.0_BD_Staging" ]; then
+      aggHA="test"
+
+    elif [ "$openstack_platform" = "DX-Staging" ]; then
+      director="10.13.11.12"
+      if [ "${AMX_LABEL_stack:-}" = "aidx_staging" ]; then
+        aggHA="HA"
+        inventory="inventory_aidx_staging.yml"
+      fi
+
+    else
+      echo "$(date) [!] Error greping Label Info. exit."
+      echo "$(date) [!] Error greping Label Info. (platform=${openstack_platform})" >> /var/log/autoHA-2026.log
+      exit 1   # [FIX] break → exit 1 (case문 안에서 break는 문법 오류)
+    fi
+
+    echo "$(date) " "alert_LEN: $AMX_ALERT_LEN"
+
+    # [FIX] alert_len=${AMX_ALERT_LEN%=*} 제거 → AMX_ALERT_LEN 직접 사용
+    for i in $(seq 1 "$AMX_ALERT_LEN"); do
+      ref="AMX_ALERT_${i}_STATUS"
+      alert_status="${!ref}"
+
+      if [[ "$alert_status" != "firing" ]]; then
+        echo "$(date) ## This alert${i} is resolved ##"
+        echo "$(date) ## This alert${i} is resolved ##" >> /var/log/autoHA-2026.log
+      else
+        Cnode_ip_ref="AMX_ALERT_${i}_LABEL_instance"
+        Cnode_ip=$(echo "${!Cnode_ip_ref}" | cut -d: -f1)
+
+        # [FIX] Cnode 조회 실패 시 해당 alert 건너뜀
+        Cnode=$(ssh root@"$director" \
+          "source /home/stack/overcloudrc; openstack hypervisor list | grep -i $Cnode_ip" \
+          | awk '{print $4}')
+
+        if [ -z "$Cnode" ]; then
+          echo "$(date) [err] Cnode 조회 실패 (ip=$Cnode_ip). 해당 alert 건너뜀."
+          echo "$(date) [err] Cnode 조회 실패 (ip=$Cnode_ip). 건너뜀." >> /var/log/autoHA-2026.log
+          continue
+        fi
+
+        echo "$(date) Compute node: $Cnode_ip $Cnode"
+        echo "$(date) ###### HA CHECK SCRIPT START ######"
+        echo "$(date) ###### HA CHECK SCRIPT START ######" >> /var/log/autoHA-2026.log
+
+        # [FIX] sh → bash (check_ha_alerting.sh 내 bash 전용 문법 사용)
+        bash /home/prometheus/prometheus-am-executor/examples/check_ha_2026.sh \
+          "$Cnode" "$Cnode_ip" "$aggHA" "$inventory" "$director"
+      fi
+    done
+    ;;
+esac
