@@ -13,6 +13,31 @@ flock -n 200 || {
 trap 'rm -f "$LOCKFILE" "$HALIST_FILE"' EXIT
 # ───────────────────────────────────────────────────────────
 
+# ── [ADD] 동일 alert(fingerprint) 반복 실행 방지 Cooldown ──────
+# 같은 Cnode라도 같은 alert가 짧은 시간 내 resolve→refire 등으로
+# 반복 들어오는 경우, 직전 처리가 끝난 직후라도 중복 실행을 막는다.
+# (위 Lock은 "동시 실행"만 막고, "순차적으로 빠르게 반복되는 실행"은 못 막음)
+COOLDOWN_SEC=300   # 5분. 환경에 맞게 조정 (한 번의 evacuate 처리 시간보다 충분히 길게)
+FP="${AMX_ALERT_1_FINGERPRINT:-unknown}"
+COOLDOWN_FILE="/tmp/autoHA_fp_${FP}.lastrun"
+
+if [ "$FP" != "unknown" ] && [ -f "$COOLDOWN_FILE" ]; then
+  last_run=$(cat "$COOLDOWN_FILE" 2>/dev/null || echo 0)
+  now=$(date +%s)
+  diff=$(( now - last_run ))
+
+  if [ "$diff" -lt "$COOLDOWN_SEC" ]; then
+    echo "$(date) [skip] alert($FP) 최근 ${diff}초 전에 이미 처리됨 (cooldown ${COOLDOWN_SEC}초). 종료." \
+      >> /var/log/autoHA-2026.log
+    echo "$(date) [skip] alert($FP) 최근 ${diff}초 전에 이미 처리됨 (cooldown ${COOLDOWN_SEC}초). 종료."
+    exit 0
+  fi
+fi
+
+# 이번 실행 시각 기록 (성공/실패 여부와 무관하게 "처리 시도"를 기록)
+date +%s > "$COOLDOWN_FILE"
+# ───────────────────────────────────────────────────────────
+
 f_check_targetHA() {
   echo "$(date)  @f_check_targetHA function Start" >> /var/log/autoHA-2026.log
 
@@ -162,6 +187,11 @@ f_Evacuate() {
       >> /var/log/autoHA-2026.log
 
     flock -u 201
+
+    # [ADD] evacuate 성공 시 cooldown 파일 제거
+    # 노드 문제가 해소(evacuate 완료)되었으므로, 같은 fingerprint의 다음 alert(있다면)는
+    # cooldown 없이 바로 정상 처리되도록 함.
+    rm -f "$COOLDOWN_FILE"
   fi
 
   echo "$(date)  @f_Evacuate function End" >> /var/log/autoHA-2026.log
