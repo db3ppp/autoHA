@@ -76,12 +76,15 @@ case $AMX_LABEL_alertname in
         fi
 
         echo "$(date) Compute node: $Cnode_ip $Cnode"
+        fp_ref="AMX_ALERT_${i}_FINGERPRINT"
+        alert_fp="${!fp_ref:-unknown}"
+
         echo "$(date) ###### HA CHECK SCRIPT START ######"
         echo "$(date) ###### HA CHECK SCRIPT START ######" >> /var/log/autoHA-2026.log
 
         # [FIX] sh → bash (check_ha_alerting.sh 내 bash 전용 문법 사용)
         bash /home/prometheus/prometheus-am-executor/examples/check_ha_2026.sh \
-          "$Cnode" "$Cnode_ip" "$aggHA" "$inventory" "$director"
+          "$Cnode" "$Cnode_ip" "$aggHA" "$inventory" "$director" "$alert_fp"
       fi
     done
     ;;

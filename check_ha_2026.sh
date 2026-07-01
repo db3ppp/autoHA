@@ -18,7 +18,7 @@ trap 'rm -f "$LOCKFILE" "$HALIST_FILE"' EXIT
 # 반복 들어오는 경우, 직전 처리가 끝난 직후라도 중복 실행을 막는다.
 # (위 Lock은 "동시 실행"만 막고, "순차적으로 빠르게 반복되는 실행"은 못 막음)
 COOLDOWN_SEC=300   # 5분. 환경에 맞게 조정 (한 번의 evacuate 처리 시간보다 충분히 길게)
-FP="${AMX_ALERT_1_FINGERPRINT:-unknown}"
+FP="${6:-${AMX_ALERT_1_FINGERPRINT:-unknown}}"
 COOLDOWN_FILE="/tmp/autoHA_fp_${FP}.lastrun"
 
 if [ "$FP" != "unknown" ] && [ -f "$COOLDOWN_FILE" ]; then
